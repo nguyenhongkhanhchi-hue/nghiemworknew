@@ -1,0 +1,327 @@
+import { useEffect, useState } from 'react';
+import { useSettingsStore, useAuthStore, useTaskStore, useChatStore, useGamificationStore, useTemplateStore, useTopicStore } from '@/stores';
+import { useHealthStore } from '@/stores/healthStore';
+import { useScreenDimming } from '@/hooks/useScreenDimming';
+import { startAutoBackup } from '@/lib/autoBackup';
+import { initCrashPrevention } from '@/lib/crashPrevention';
+import { supabase } from '@/lib/supabase';
+import { checkDeadlineNotifications, requestNotificationPermission } from '@/lib/notifications';
+import { BottomNav } from '@/components/layout/BottomNav';
+import { ToastContainer } from '@/components/layout/ToastContainer';
+import { TaskTimer } from '@/components/features/TaskTimer';
+import { LucyChatFAB } from '@/pages/AIPage';
+import { UnifiedFAB } from '@/components/layout/UnifiedFAB';
+import { AddTaskSheet } from '@/components/features/AddTaskInput';
+import { CheckSquare, Calendar, FileText, Wallet, Settings, Heart } from 'lucide-react';
+import TasksPage from '@/pages/TasksPage';
+import CashFlowPage from '@/pages/CashFlowPage';
+import SettingsPage from '@/pages/SettingsPage';
+import AchievementsPage from '@/pages/AchievementsPage';
+import AuthPage from '@/pages/AuthPage';
+import TemplatesPage from '@/pages/TemplatesPage';
+import FinancePage from '@/pages/FinancePage';
+import GroupChatPage from '@/pages/GroupChatPage';
+import AdminPage from '@/pages/AdminPage';
+import NotificationsPage from '@/pages/NotificationsPage';
+import HealthPage from '@/pages/HealthPage';
+import type { TaskTemplate } from '@/types';
+
+export default function App() {
+  const currentPage = useSettingsStore(s => s.currentPage);
+  const fontScale = useSettingsStore(s => s.fontScale);
+  const timezone = useSettingsStore(s => s.timezone);
+  const notificationSettings = useSettingsStore(s => s.notificationSettings);
+  const user = useAuthStore(s => s.user);
+  const isLoading = useAuthStore(s => s.isLoading);
+  const setUser = useAuthStore(s => s.setUser);
+  
+  // Screen dimming and lock - works across all pages
+  const dimmingState = useScreenDimming();
+  const setLoading = useAuthStore(s => s.setLoading);
+  const initTasks = useTaskStore(s => s.initForUser);
+  const initChat = useChatStore(s => s.initForUser);
+  const initGam = useGamificationStore(s => s.initForUser);
+  const initTemplates = useTemplateStore(s => s.initForUser);
+  const initTopics = useTopicStore(s => s.initForUser);
+  const initHealth = useHealthStore(s => s.initForUser);
+  const tasks = useTaskStore(s => s.tasks);
+  const checkAndMarkOverdue = useTaskStore(s => s.checkAndMarkOverdue);
+  // Detect orientation and device type
+  const [isLandscape, setIsLandscape] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [showLucy, setShowLucy] = useState(false);
+  const [showTemplateEditor, setShowTemplateEditor] = useState(false);
+  const [templateMode, setTemplateMode] = useState<'single' | 'group'>('single');
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  // Crash prevention - init once
+  useEffect(() => { initCrashPrevention(); }, []);
+
+  // Font scale
+  useEffect(() => { document.documentElement.style.setProperty('--font-scale', String(fontScale)); }, [fontScale]);
+
+  // Detect orientation, device type, and online status
+  useEffect(() => {
+    const check = () => setIsLandscape(window.innerWidth > window.innerHeight && window.innerWidth > 600);
+    const checkDesktop = () => setIsDesktop(window.innerWidth >= 1024);
+    check();
+    checkDesktop();
+    window.addEventListener('resize', check);
+    window.addEventListener('resize', checkDesktop);
+    return () => {
+      window.removeEventListener('resize', check);
+      window.removeEventListener('resize', checkDesktop);
+    };
+  }, []);
+
+  // Detect offline status
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Set landscape and desktop classes on body
+  useEffect(() => {
+    document.body.classList.toggle('landscape', isLandscape);
+    document.body.classList.toggle('portrait', !isLandscape);
+    document.body.classList.toggle('desktop', isDesktop);
+    document.body.classList.toggle('mobile', !isDesktop);
+  }, [isLandscape, isDesktop]);
+
+  // Preload voices
+  useEffect(() => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+    }
+  }, []);
+
+  // Keyboard shortcuts for desktop
+  useEffect(() => {
+    if (!isDesktop) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in input fields
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      
+      const key = e.key.toLowerCase();
+      const pages: Record<string, string> = {
+        '1': 'tasks', 't': 'tasks',
+        '2': 'templates',
+        '3': 'cashflow', 'c': 'cashflow',
+        '4': 'health', 'h': 'health',
+        '5': 'settings',
+      };
+      
+      if (pages[key]) {
+        useSettingsStore.getState().setCurrentPage(pages[key] as any);
+      }
+      
+      // N for new task
+      if (key === 'n' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setShowAddTask(true);
+      }
+      
+      // Escape to close modals
+      if (key === 'escape') {
+        setShowAddTask(false);
+        setShowLucy(false);
+        setShowTemplateEditor(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDesktop]);
+
+  // Request notification permission on first load
+  useEffect(() => {
+    const requestNotifs = async () => {
+      const hasRequested = localStorage.getItem('notification_permission_requested');
+      if (!hasRequested) {
+        await requestNotificationPermission();
+        localStorage.setItem('notification_permission_requested', 'true');
+      }
+    };
+    requestNotifs();
+  }, []);
+
+  // Auth session - persistent login
+  useEffect(() => {
+    let mounted = true;
+
+    // Check for admin login
+    const adminSession = localStorage.getItem('nw_admin_session');
+    if (adminSession === 'true') {
+      setUser({ id: 'admin', email: 'admin@nghiemwork.local', username: 'Admin' });
+      
+      // Auto-load backup data for admin if not already loaded
+      const hasLoadedBackup = localStorage.getItem('nw_backup_loaded');
+      if (!hasLoadedBackup) {
+        fetch('/backup_dummy_data.json')
+          .then(res => res.json())
+          .then(data => {
+            if (data.tasks) localStorage.setItem('nw_tasks_admin', JSON.stringify(data.tasks));
+            if (data.templates) localStorage.setItem('nw_templates_admin', JSON.stringify(data.templates));
+            if (data.gamification) localStorage.setItem('nw_gamification_admin', JSON.stringify(data.gamification));
+            if (data.settings) {
+              Object.entries(data.settings).forEach(([key, value]) => {
+                localStorage.setItem(`nw_${key}`, JSON.stringify(value));
+              });
+            }
+            localStorage.setItem('nw_backup_loaded', 'true');
+            window.location.reload();
+          })
+          .catch(err => console.error('Failed to load backup:', err));
+      }
+      return;
+    }
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (mounted && session?.user) {
+        const u = session.user;
+        setUser({ id: u.id, email: u.email!, username: u.user_metadata?.username || u.email!.split('@')[0] });
+      } else if (mounted) setLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+        const u = session.user;
+        setUser({ id: u.id, email: u.email!, username: u.user_metadata?.username || u.email!.split('@')[0] });
+      } else if (event === 'SIGNED_OUT') {
+        localStorage.removeItem('nw_admin_session');
+        setUser(null); setLoading(false);
+      }
+    });
+    return () => { mounted = false; subscription.unsubscribe(); };
+  }, []);
+
+  // Init stores + auto backup
+  useEffect(() => {
+    if (user) {
+      const uid = user.id === 'admin' ? 'admin' : user.id;
+      initTasks(uid); initChat(uid); initGam(uid); initTemplates(uid); initTopics(uid); initHealth(uid);
+      // Start auto backup (every 3 hours + on login)
+      const stopBackup = startAutoBackup(uid);
+      return stopBackup;
+    }
+  }, [user?.id]);
+
+  // ✅ Auto-check overdue + notifications (mỗi 10 giây)
+  useEffect(() => {
+    if (!user) return;
+    const notified = new Set<string>();
+    const check = () => {
+      checkAndMarkOverdue();
+      if (notificationSettings.enabled) checkDeadlineNotifications(tasks, timezone, notificationSettings.beforeDeadline, notified);
+    };
+    check(); // Check ngay khi mount
+    const i = setInterval(check, 10000); // Mỗi 10 giây
+    return () => clearInterval(i);
+  }, [user?.id, tasks.length, timezone, notificationSettings.enabled]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-[100dvh] flex items-center justify-center bg-[var(--bg-base)]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="size-12 rounded-2xl bg-[var(--accent-dim)] flex items-center justify-center border border-[var(--border-accent)] animate-pulse">
+            <span className="text-xl font-bold text-[var(--accent-primary)]">N</span>
+          </div>
+          <p className="text-sm text-[var(--text-muted)]">Đang tải...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) return <AuthPage />;
+
+  const renderPage = () => {
+    switch (currentPage) {
+      case 'tasks': return <TasksPage />;
+      case 'cashflow': return <CashFlowPage />;
+      case 'settings': return <SettingsPage />;
+      case 'templates': return <TemplatesPage 
+        externalEditorOpen={showTemplateEditor}
+        externalEditorMode={templateMode}
+        onExternalEditorClose={() => setShowTemplateEditor(false)}
+      />;
+      case 'notifications': return <NotificationsPage />;
+      case 'health': return <HealthPage />;
+      default: return <TasksPage />;
+    }
+  };
+
+  return (
+    <div className={`min-h-[100dvh] flex bg-[var(--bg-base)] overflow-x-hidden ${isLandscape ? 'flex-row' : 'flex-col'} ${isDesktop ? 'desktop-layout' : ''}`}>
+      <ToastContainer />
+      <TaskTimer />
+      
+      {/* Offline Indicator */}
+      {isOffline && (
+        <div className="fixed top-0 left-0 right-0 z-[9999] bg-yellow-500 text-yellow-900 text-center text-xs py-1 font-medium">
+          ⚠️ Bạn đang offline - Dữ liệu sẽ được đồng bộ khi có mạng
+        </div>
+      )}
+      
+      <main className={`flex-1 overflow-y-auto overflow-x-hidden ${isLandscape ? 'ml-16' : ''} ${isDesktop ? 'desktop-main' : ''}`}
+        style={{ paddingTop: isDesktop ? '0' : (isOffline ? '24px' : '0'), paddingBottom: isLandscape || isDesktop ? '0' : 'calc(56px + env(safe-area-inset-bottom, 0px))' }}>
+        {renderPage()}
+      </main>
+      {!isDesktop && <BottomNav />}
+      {isDesktop && (
+        <nav className="fixed left-0 top-0 bottom-0 w-56 bg-[var(--bg-elevated)] border-r border-[var(--border-subtle)] z-50 flex flex-col">
+          <div className="p-4 border-b border-[var(--border-subtle)]">
+            <div className="size-12 rounded-xl bg-[var(--accent-dim)] flex items-center justify-center">
+              <span className="text-2xl font-bold text-[var(--accent-primary)]">N</span>
+            </div>
+            <p className="mt-2 text-sm font-medium text-[var(--text-primary)]">Nghiệp việc</p>
+            <p className="text-xs text-[var(--text-muted)]">Quản lý công việc</p>
+          </div>
+          <div className="flex-1 py-2">
+            {['tasks', 'templates', 'cashflow', 'health', 'settings'].map(page => (
+              <button key={page} onClick={() => useSettingsStore.getState().setCurrentPage(page as any)}
+                className={`w-full px-4 py-3 flex items-center gap-3 text-left transition-colors ${
+                  currentPage === page ? 'bg-[var(--accent-dim)] text-[var(--accent-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'
+                }`}>
+                {page === 'tasks' && <CheckSquare size={18} />}
+                {page === 'templates' && <FileText size={18} />}
+                {page === 'cashflow' && <Wallet size={18} />}
+                {page === 'health' && <Heart size={18} />}
+                {page === 'settings' && <Settings size={18} />}
+                <span className="text-sm font-medium capitalize">{page === 'cashflow' ? 'Dòng tiền' : page === 'templates' ? 'Mẫu' : page === 'tasks' ? 'Việc' : page}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
+      )}
+      <UnifiedFAB 
+        onAddTask={() => setShowAddTask(true)}
+        onAddSingleTemplate={() => { setTemplateMode('single'); setShowTemplateEditor(true); }}
+        onAddGroupTemplate={() => { setTemplateMode('group'); setShowTemplateEditor(true); }}
+        onOpenLucy={() => setShowLucy(!showLucy)} 
+        showLucy={showLucy}
+      />
+      {showAddTask && <AddTaskSheet onClose={() => setShowAddTask(false)} />}
+      {showLucy && (
+        <div className={`fixed inset-0 z-[55] flex bg-[var(--bg-base)] ${
+          isLandscape ? 'right-0 left-auto w-96' : 'flex-col'
+        }`} style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+          <LucyChatFAB />
+        </div>
+      )}
+      
+      {/* Screen Dimming Overlay */}
+      {dimmingState.isDimmed && (
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center pointer-events-none">
+          <p className="text-xs text-white/60 bg-black/60 px-4 py-2 rounded-full animate-pulse">Vuốt để mở khóa</p>
+        </div>
+      )}
+    </div>
+  );
+}

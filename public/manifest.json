@@ -1,0 +1,91 @@
+{
+  "name": "Nghiệp Việc - Quản lý công việc",
+  "short_name": "Nghiệp Việc",
+  "description": "Quản lý công việc thông minh, theo dõi sức khoẻ, tài chính",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A0A0F",
+  "theme_color": "#00E5CC",
+  "orientation": "any",
+  "categories": ["productivity", "health", "finance"],
+  "shortcuts": [
+    {
+      "name": "Việc hôm nay",
+      "short_name": "Việc",
+      "description": "Xem công việc hôm nay",
+      "url": "/?page=tasks",
+      "icons": [{ "src": "/og-image.jpg", "sizes": "96x96" }]
+    },
+    {
+      "name": "Thêm việc mới",
+      "short_name": "+ Việc",
+      "description": "Tạo công việc mới",
+      "url": "/?action=add",
+      "icons": [{ "src": "/og-image.jpg", "sizes": "96x96" }]
+    },
+    {
+      "name": "Lịch trình",
+      "short_name": "Lịch",
+      "description": "Xem lịch trình hôm nay",
+      "url": "/?page=schedule",
+      "icons": [{ "src": "/og-image.jpg", "sizes": "96x96" }]
+    },
+    {
+      "name": "Sức khoẻ",
+      "short_name": "Sức khoẻ",
+      "description": "Theo dõi sức khoẻ",
+      "url": "/?page=health",
+      "icons": [{ "src": "/og-image.jpg", "sizes": "96x96" }]
+    }
+  ],
+  "icons": [
+    {
+      "src": "/og-image.jpg",
+      "sizes": "72x72",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/og-image.jpg",
+      "sizes": "96x96",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/og-image.jpg",
+      "sizes": "128x128",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/og-image.jpg",
+      "sizes": "144x144",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/og-image.jpg",
+      "sizes": "152x152",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/og-image.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/og-image.jpg",
+      "sizes": "384x384",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/og-image.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ]
+}
